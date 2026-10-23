@@ -1,0 +1,732 @@
+import { useCallback, useEffect, useState } from "react";
+import { io } from "socket.io-client";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  FaArrowLeft,
+  FaClock,
+  FaPaperclip,
+  FaPlus,
+  FaArrowsRotate,
+  FaPaperPlane,
+  FaWandMagicSparkles,
+  FaTicket as TicketIcon,
+} from "react-icons/fa6";
+import { api, shortDate } from "../lib/api.js";
+import {
+  AppShell,
+  Alert,
+  Badge,
+  Button,
+  EmptyState,
+  PageHeader,
+  PriorityBadge,
+  SelectField,
+  StatusBadge,
+  Textarea,
+  Field,
+} from "../components/UI.jsx";
+import { useDispatch, useSelector } from "react-redux";
+import {
+  ticketsFailed,
+  ticketsLoaded,
+  ticketsLoading,
+  ticketUpserted,
+} from "../store/index.js";
+
+export function TicketList({ admin = false }) {
+  const dispatch = useDispatch();
+  const { items: tickets, loading, error } = useSelector((s) => s.tickets);
+  const [status, setStatus] = useState("");
+  const [category, setCategory] = useState("");
+  const [priority, setPriority] = useState("");
+  const load = useCallback(
+    async (quiet = false) => {
+      if (!quiet) dispatch(ticketsLoading());
+      try {
+        const qs = new URLSearchParams();
+        if (status) qs.set("status", status);
+        if (category) qs.set("category", category);
+        if (priority) qs.set("priority", priority);
+        const d = await api(`/tickets?${qs}`);
+        dispatch(ticketsLoaded(d.tickets));
+      } catch (e) {
+        dispatch(ticketsFailed(e.message));
+      }
+    },
+    [dispatch, status, category, priority],
+  );
+  useEffect(() => {
+    load();
+    const socket = io(
+      import.meta.env.VITE_SOCKET_URL || "http://localhost:5000",
+      { withCredentials: true },
+    );
+    socket.on("ticket:updated", () => load(true));
+    return () => socket.disconnect();
+  }, [load]);
+  return (
+    <AppShell admin={admin}>
+      <PageHeader
+        eyebrow={admin ? "Operations workspace" : "Your conversations"}
+        title={admin ? "Ticket queue" : "My tickets"}
+        description={
+          admin
+            ? "Prioritise incoming requests, keep conversations moving and make sure every author gets a clear answer."
+            : "Follow up on your support queries and see replies from the BookLeaf team."
+        }
+        action={
+          !admin && (
+            <Link to="/author/tickets/new">
+              <Button>
+                <FaPlus size={17} /> New ticket
+              </Button>
+            </Link>
+          )
+        }
+      />
+      {error && <Alert>{error}</Alert>}
+      <div className="mb-5 grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:grid-cols-3">
+        <SelectField
+          label="Status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="">All statuses</option>
+          {["Open", "In Progress", "Resolved", "Closed"].map((x) => (
+            <option key={x}>{x}</option>
+          ))}
+        </SelectField>
+        <SelectField
+          label="Category"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          <option value="">All categories</option>
+          {[
+            "Royalty & Payments",
+            "ISBN & Metadata Issues",
+            "Printing & Quality",
+            "Distribution & Availability",
+            "Book Status & Production Updates",
+            "General Inquiry",
+          ].map((x) => (
+            <option key={x}>{x}</option>
+          ))}
+        </SelectField>
+        {admin && (
+          <SelectField
+            label="Priority"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+          >
+            <option value="">All priorities</option>
+            {["Critical", "High", "Medium", "Low"].map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </SelectField>
+        )}
+      </div>
+      {loading && !tickets.length ? (
+        <div className="rounded-2xl bg-white p-10 text-center text-sm text-slate-400">
+          Loading tickets…
+        </div>
+      ) : !tickets.length ? (
+        <EmptyState
+          icon={TicketIcon}
+          title="No tickets to show"
+          description="There are no support requests matching these filters yet."
+          action={
+            !admin && (
+              <Link to="/author/tickets/new">
+                <Button>
+                  <FaPlus size={16} /> Create a ticket
+                </Button>
+              </Link>
+            )
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+          <div className="hidden grid-cols-[minmax(0,1fr)_140px_110px_100px_100px] gap-4 border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[10px] font-bold uppercase tracking-[.14em] text-slate-400 md:grid">
+            <span>Ticket details</span>
+            <span>{admin ? "Author" : "Category"}</span>
+            <span>Priority</span>
+            <span>Status</span>
+            <span>Updated</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {tickets.map((t) => (
+              <Link
+                to={
+                  admin ? `/admin/tickets/${t._id}` : `/author/tickets/${t._id}`
+                }
+                key={t._id}
+                className="grid gap-3 px-4 py-4 transition hover:bg-slate-50/80 sm:px-5 md:grid-cols-[minmax(0,1fr)_140px_110px_100px_100px] md:items-center md:gap-4"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-bold text-slate-800">
+                      {t.subject}
+                    </span>
+                    {t.aiClassified && (
+                      <span title="AI classified">
+                        <FaWandMagicSparkles
+                          size={13}
+                          className="text-violet-500"
+                        />
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+                    {t.bookTitle} · {t.description}
+                  </p>
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    #{t._id.slice(-6).toUpperCase()} · {t.replies?.length || 0}{" "}
+                    replies
+                  </p>
+                </div>
+                <div className="text-xs text-slate-500">
+                  {admin ? (
+                    <>
+                      <span className="block font-semibold text-slate-700">
+                        {t.author?.name}
+                      </span>
+                      <span>{t.author?.email}</span>
+                    </>
+                  ) : (
+                    <span>{t.category}</span>
+                  )}
+                </div>
+                <div>
+                  <PriorityBadge priority={t.priority} />
+                </div>
+                <div>
+                  <StatusBadge status={t.status} />
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <FaClock size={13} />
+                  {shortDate(t.lastActivityAt || t.updatedAt)}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
+export function NewTicket() {
+  const [books, setBooks] = useState([]);
+  const [bookId, setBookId] = useState("");
+  const [subject, setSubject] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
+  useEffect(() => {
+    api("/books")
+      .then((d) => setBooks(d.books))
+      .catch((e) => setError(e.message));
+  }, []);
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api("/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          bookId: bookId || null,
+          subject,
+          description,
+          attachmentName: file?.name || "",
+        }),
+      });
+      navigate(`/author/tickets/${d.ticket._id}`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <AppShell>
+      <PageHeader
+        eyebrow="We're listening"
+        title="Submit a support query"
+        description="Share a few details and the BookLeaf team will help you work through it."
+      />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <form
+          onSubmit={submit}
+          className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7"
+        >
+          <Alert>{error}</Alert>
+          <SelectField
+            label="Which book is this about?"
+            value={bookId}
+            onChange={(e) => setBookId(e.target.value)}
+          >
+            <option value="">General / Account Level</option>
+            {books.map((b) => (
+              <option key={b._id} value={b._id}>
+                {b.title}
+              </option>
+            ))}
+          </SelectField>
+          <Field
+            label="Subject"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder="e.g. Royalty payment for Q2"
+            required
+            minLength={3}
+            maxLength={160}
+          />
+          <Textarea
+            label="Tell us more"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue and any relevant dates or details…"
+            rows={7}
+            required
+            minLength={10}
+            maxLength={5000}
+          />
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Attachment{" "}
+              <span className="font-normal text-slate-400">(optional)</span>
+            </span>
+            <span className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 p-4 hover:border-indigo-400">
+              <FaPaperclip size={18} className="text-slate-400" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-700">
+                  {file?.name || "Choose a file"}
+                </span>
+                <span className="mt-1 block text-xs text-slate-400">
+                  UI only · file is not uploaded
+                </span>
+              </span>
+              <input
+                type="file"
+                className="sr-only"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </span>
+          </label>
+          <div className="flex flex-col-reverse justify-between gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center">
+            <p className="text-xs text-slate-400">
+              Typical investigation update: within 48 hours.
+            </p>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Submitting…" : "Submit query"}
+              <FaPaperPlane size={16} />
+            </Button>
+          </div>
+        </form>
+        <aside className="h-fit rounded-2xl bg-[#202b59] p-5 text-white">
+          <div className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-white/10">
+            <FaWandMagicSparkles size={19} />
+          </div>
+          <h2 className="font-extrabold">What happens next?</h2>
+          <div className="mt-5 space-y-5">
+            {[
+              [
+                "01",
+                "We review your query",
+                "Your ticket is categorised and prioritised.",
+              ],
+              [
+                "02",
+                "The right team takes a look",
+                "We may follow up if more details are needed.",
+              ],
+              [
+                "03",
+                "You get an update here",
+                "Replies show up in your ticket conversation.",
+              ],
+            ].map(([n, t, d]) => (
+              <div className="flex gap-3" key={n}>
+                <span className="text-xs font-extrabold text-indigo-300">
+                  {n}
+                </span>
+                <div>
+                  <p className="text-sm font-bold">{t}</p>
+                  <p className="mt-1 text-xs leading-5 text-indigo-100/65">
+                    {d}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+    </AppShell>
+  );
+}
+
+export function TicketDetail({ admin = false }) {
+  const { id } = useParams();
+  const [ticket, setTicket] = useState(null);
+  const [reply, setReply] = useState("");
+  const [draft, setDraft] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [draftNote, setDraftNote] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const d = await api(`/tickets/${id}`);
+      setTicket(d.ticket);
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [id]);
+  useEffect(() => {
+    load();
+    const socket = io(
+      import.meta.env.VITE_SOCKET_URL || "http://localhost:5000",
+      { withCredentials: true },
+    );
+    socket.on("ticket:updated", ({ ticket: updated }) => {
+      if (updated?._id === id) setTicket(updated);
+    });
+    return () => socket.disconnect();
+  }, [load, id]);
+  async function update(body) {
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api(`/tickets/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      setTicket(d.ticket);
+      setNote("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function sendReply(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api(`/tickets/${id}/replies`, {
+        method: "POST",
+        body: JSON.stringify({ body: reply }),
+      });
+      setTicket(d.ticket);
+      setReply("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function makeDraft() {
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api(`/tickets/${id}/draft`, { method: "POST" });
+      setDraft(d.draft);
+      setDraftNote(
+        d.note ||
+          (d.aiGenerated
+            ? "AI draft ready. Review it before sending."
+            : "Fallback draft ready. Review it before sending."),
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!ticket)
+    return (
+      <AppShell admin={admin}>
+        <div className="py-20 text-center text-sm text-slate-500">
+          {error || "Loading ticket…"}
+        </div>
+      </AppShell>
+    );
+  return (
+    <AppShell admin={admin}>
+      <Link
+        to={admin ? "/admin/tickets" : "/author/tickets"}
+        className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-indigo-600"
+      >
+        <FaArrowLeft size={16} /> Back to{" "}
+        {admin ? "ticket queue" : "my tickets"}
+      </Link>
+      <PageHeader
+        eyebrow={`FaTicket #${ticket._id.slice(-6).toUpperCase()}`}
+        title={ticket.subject}
+        description={`${ticket.bookTitle} · Submitted ${shortDate(ticket.createdAt)}`}
+      />
+      <Alert>{error}</Alert>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-5">
+          <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="grid h-9 w-9 place-items-center rounded-full bg-indigo-100 text-xs font-extrabold text-indigo-700">
+                  {ticket.author?.name?.slice(0, 1)?.toUpperCase() || "A"}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">
+                    {ticket.author?.name || "You"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {shortDate(ticket.createdAt)}
+                  </p>
+                </div>
+              </div>
+              <Badge>{ticket.category}</Badge>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600">
+              {ticket.description}
+            </p>
+            {ticket.attachmentName && (
+              <p className="mt-4 flex items-center gap-2 text-xs text-slate-400">
+                <FaPaperclip size={14} />
+                {ticket.attachmentName} <span>(name only; not uploaded)</span>
+              </p>
+            )}
+          </section>
+          <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-5 font-extrabold text-slate-900">
+              Conversation{" "}
+              <span className="ml-1 text-sm font-semibold text-slate-400">
+                ({ticket.replies?.length || 0})
+              </span>
+            </h2>
+            {!ticket.replies?.length ? (
+              <p className="rounded-xl bg-slate-50 p-5 text-center text-sm text-slate-400">
+                No replies yet. The support team will respond here.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {ticket.replies.map((r) => (
+                  <div
+                    key={r._id}
+                    className={`rounded-2xl p-4 ${r.author?._id === ticket.author?._id ? "bg-slate-50" : "bg-indigo-50/70"}`}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span className="text-sm font-bold text-slate-800">
+                        {r.authorName}{" "}
+                        {r.author?._id !== ticket.author?._id && (
+                          <Badge tone="blue">BookLeaf support</Badge>
+                        )}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {shortDate(r.createdAt)}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                      {r.body}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          {admin ? (
+            <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-extrabold text-slate-900">
+                  Reply to author
+                </h2>
+                <Button variant="secondary" onClick={makeDraft} disabled={busy}>
+                  <FaWandMagicSparkles size={15} />{" "}
+                  {busy ? "Working…" : "Draft with AI"}
+                </Button>
+              </div>
+              {draftNote && (
+                <p className="mb-3 text-xs text-slate-500">{draftNote}</p>
+              )}
+              <form onSubmit={sendReply} className="space-y-3">
+                <Textarea
+                  label="Response"
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  placeholder="Write a clear, empathetic response…"
+                  rows={5}
+                  required
+                  minLength={2}
+                />
+                <Button disabled={busy}>
+                  <FaPaperPlane size={15} /> FaPaperPlane response
+                </Button>
+              </form>
+              {draft && (
+                <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50/50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="flex items-center gap-2 text-sm font-bold text-violet-800">
+                      <FaWandMagicSparkles size={15} /> Suggested draft
+                    </p>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setReply(draft);
+                        setDraft("");
+                        setDraftNote("");
+                      }}
+                    >
+                      Use this draft
+                    </Button>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                    {draft}
+                  </p>
+                </div>
+              )}
+            </section>
+          ) : null}
+        </div>
+        <aside className="space-y-5">
+          <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 font-extrabold text-slate-900">
+              Ticket details
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-xs text-slate-400">Status</p>
+                {admin ? (
+                  <select
+                    value={ticket.status}
+                    onChange={(e) => update({ status: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                  >
+                    {["Open", "In Progress", "Resolved", "Closed"].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <StatusBadge status={ticket.status} />
+                )}
+              </div>
+              <div>
+                <p className="mb-2 text-xs text-slate-400">Priority</p>
+                {admin ? (
+                  <select
+                    value={ticket.priority}
+                    onChange={(e) => update({ priority: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                  >
+                    {["Critical", "High", "Medium", "Low"].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <PriorityBadge priority={ticket.priority} />
+                )}
+              </div>
+              <div>
+                <p className="mb-2 text-xs text-slate-400">Category</p>
+                {admin ? (
+                  <select
+                    value={ticket.category}
+                    onChange={(e) => update({ category: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                  >
+                    {[
+                      "Royalty & Payments",
+                      "ISBN & Metadata Issues",
+                      "Printing & Quality",
+                      "Distribution & Availability",
+                      "Book Status & Production Updates",
+                      "General Inquiry",
+                    ].map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-sm font-semibold text-slate-700">
+                    {ticket.category}
+                  </p>
+                )}
+              </div>
+              {admin && (
+                <div>
+                  <p className="mb-2 text-xs text-slate-400">Assigned to</p>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {ticket.assignee?.name || "Unassigned"}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    className="mt-2 w-full"
+                    onClick={() => update({ assigneeToMe: true })}
+                    disabled={busy}
+                  >
+                    Assign to me
+                  </Button>
+                </div>
+              )}
+            </div>
+          </section>
+          {admin && (
+            <section className="rounded-2xl border border-amber-100 bg-amber-50/70 p-5">
+              <h2 className="mb-1 font-extrabold text-slate-800">
+                Internal notes
+              </h2>
+              <p className="mb-4 text-xs leading-5 text-slate-500">
+                Visible to the operations team only.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  update({ internalNote: note });
+                }}
+                className="space-y-3"
+              >
+                <Textarea
+                  label="Add a note"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Context for the team…"
+                  rows={3}
+                />
+                <Button
+                  variant="secondary"
+                  type="submit"
+                  disabled={busy || !note.trim()}
+                >
+                  Save internal note
+                </Button>
+              </form>
+              <div className="mt-4 space-y-3">
+                {ticket.internalNotes?.map((n, i) => (
+                  <div
+                    key={n._id || i}
+                    className="border-t border-amber-200/70 pt-3"
+                  >
+                    <p className="text-xs font-bold text-slate-700">
+                      {n.authorName}{" "}
+                      <span className="font-normal text-slate-400">
+                        · {shortDate(n.createdAt)}
+                      </span>
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                      {n.body}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          <p className="flex items-center gap-2 px-1 text-xs leading-5 text-slate-400">
+            <FaArrowsRotate size={13} /> Ticket updates arrive in real time over
+            Socket.IO.
+          </p>
+        </aside>
+      </div>
+    </AppShell>
+  );
+}
